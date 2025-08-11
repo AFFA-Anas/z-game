@@ -5,7 +5,7 @@ const admin = require("firebase-admin");
 admin.initializeApp();
 
 // HTTP function — can be called from browser via fetch()
-exports.sendNumber = onRequest(async (req, res) => {
+exports.assignRandomNumber = onRequest(async (req, res) => {
   // Handle preflight request for CORS
   if (req.method === "OPTIONS") {
     res.set("Access-Control-Allow-Origin", "*");
@@ -31,7 +31,7 @@ exports.sendNumber = onRequest(async (req, res) => {
     const decodedToken = await admin.auth().verifyIdToken(idToken);
     const uid = decodedToken.uid;
 
-    const number = req.body.number;
+    const number = Math.floor(Math.random() * 100);
 
     // You can store or verify the number here
     console.log(`User ${uid} sent number: ${number}`);

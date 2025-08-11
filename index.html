@@ -71,8 +71,7 @@
         headers: {
           "Content-Type": "application/json",
           "Authorization": "Bearer " + idToken
-        },
-        body: JSON.stringify({ number: Math.floor(Math.random() * 100) }),
+        }
       });
 
       if (!response.ok) {
