@@ -20,7 +20,6 @@ exports.assignRandomNumber = onRequest(async (req, res) => {
 
   // Check auth token from Firebase client
   const authHeader = req.headers.authorization;
-
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).send("Unauthorized: Missing or invalid token");
   }
@@ -28,17 +27,24 @@ exports.assignRandomNumber = onRequest(async (req, res) => {
   const idToken = authHeader.split("Bearer ")[1];
 
   try {
+    // Verify the token
     const decodedToken = await admin.auth().verifyIdToken(idToken);
     const uid = decodedToken.uid;
 
+    // Generate a random number (0–99)
     const number = Math.floor(Math.random() * 100);
 
-    // You can store or verify the number here
-    console.log(`User ${uid} sent number: ${number}`);
+    console.log(`User ${uid} assigned number: ${number}`);
 
-    // Save to Realtime Database (optional)
-    await admin.database().ref(`games/default/${uid}`).set({number});
-
+    // Append to the player's numbers list in Realtime Database
+    await admin
+        .database()
+        .ref(`games/default/${uid}/numbers`)
+        .push({
+          number,
+          createdAt: admin.database.ServerValue.TIMESTAMP,
+        });
+    // Send response
     res.status(200).send({success: true, number});
   } catch (err) {
     console.error("Token verification error:", err);

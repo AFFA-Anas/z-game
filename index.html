@@ -40,18 +40,24 @@
 
         // Realtime listener
         gameRef.on("value", (snapshot) => {
-          console.log("new data")
+          console.log("new data");
           const data = snapshot.val();
-          console.log(data)
+          console.log(data);
           if (!data) return;
 
-          if (data[currentUid]) {
-            document.getElementById("yourNumber").innerText = "Your Number: " + data[currentUid]["number"];
+          // Show your last number
+          if (data[currentUid] && data[currentUid].numbers) {
+          const myNumbersArray = Object.values(data[currentUid].numbers);
+          const myLast = myNumbersArray.sort((a, b) => a.createdAt - b.createdAt).pop();
+          document.getElementById("yourNumber").innerText = "Your Number: " + myLast.number;
           }
 
+          // Show opponent's last number
           const opponentId = Object.keys(data).find(id => id !== currentUid);
-          if (opponentId && data[opponentId]) {
-            document.getElementById("opponentNumber").innerText = "Opponent's Number: " + data[opponentId]["number"];
+          if (opponentId && data[opponentId] && data[opponentId].numbers) {
+          const opponentNumbersArray = Object.values(data[opponentId].numbers);
+          const oppLast = opponentNumbersArray.sort((a, b) => a.createdAt - b.createdAt).pop();
+          document.getElementById("opponentNumber").innerText = "Opponent's Number: " + oppLast.number;
           }
         });
       }).catch(console.error);
