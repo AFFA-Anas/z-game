@@ -10,10 +10,10 @@
 <body>
   <h1 id="yourNumber">Your Number: -</h1>
   <h1 id="opponentNumber">Opponent's Number: -</h1>
-  <button onclick="assignRandomNumber()">Generate Number</button>
+  <button onclick="generateNumber()">Generate Number</button>
 
   <script>
-    // 🧠 Replace with your Firebase config
+    // ?? Replace with your Firebase config
     const firebaseConfig = {
       apiKey: "AIzaSyDaHiA8qZIin9Vh3TDsmb4Qp9wW3oOEAQw",
       authDomain: "z-ggame.firebaseapp.com",
@@ -26,70 +26,122 @@
     };
 
     firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
-    const functions = firebase.functions();
+	const db = firebase.database();
 
-    let currentUid = null;
-    const gameRef = db.ref("games/default");
+	let currentUid = null;
+	let currentGameId = null;
+	let opponentNumbersOff = null; // store detach function
 
-    firebase.auth().signOut().then(() => {
-      // Anonymous login
-      firebase.auth().signInAnonymously().then(() => {
-        currentUid = firebase.auth().currentUser.uid;
-        console.log("Signed in anonymously as", currentUid);
+	// Step 1: Sign in anonymously
+	firebase.auth().signOut().then(() => {
+	  firebase.auth().signInAnonymously().then(() => {
+		currentUid = firebase.auth().currentUser.uid;
+		console.log("Signed in anonymously as", currentUid);
 
-        // Realtime listener
-        gameRef.on("value", (snapshot) => {
-          console.log("new data");
-          const data = snapshot.val();
-          console.log(data);
-          if (!data) return;
+		// Step 2: Add to lobby
+		db.ref("lobby/" + currentUid).set({
+		  joinedAt: Date.now()
+		});
+		db.ref("lobby/" + currentUid).onDisconnect().remove();
 
-          // Show your last number
-          if (data[currentUid] && data[currentUid].numbers) {
-          const myNumbersArray = Object.values(data[currentUid].numbers);
-          const myLast = myNumbersArray.sort((a, b) => a.createdAt - b.createdAt).pop();
-          document.getElementById("yourNumber").innerText = "Your Number: " + myLast.number;
-          }
+		// Step 3: Watch for my current game pointer
+		const myPointerRef = db.ref(`userCurrentGame/${currentUid}`);
+		myPointerRef.on("value", (snap) => {
+		  const val = snap.val();
+		  console.log("userCurrentGame:", val);
+		  if (!val || !val.gameId) return;
 
-          // Show opponent's last number
-          const opponentId = Object.keys(data).find(id => id !== currentUid);
-          if (opponentId && data[opponentId] && data[opponentId].numbers) {
-          const opponentNumbersArray = Object.values(data[opponentId].numbers);
-          const oppLast = opponentNumbersArray.sort((a, b) => a.createdAt - b.createdAt).pop();
-          document.getElementById("opponentNumber").innerText = "Opponent's Number: " + oppLast.number;
-          }
-        });
-      }).catch(console.error);
-    });
-    // Send number via Cloud Function
-    async function assignRandomNumber() {
-      const user = firebase.auth().currentUser;
-      if (!user) {
-        console.error("User not signed in");
-        return;
-      }
+		  if (currentGameId !== val.gameId) {
+			currentGameId = val.gameId;
+			console.log("Joined game:", currentGameId);
 
-      const idToken = await user.getIdToken();
+			// Start listening for last numbers in this game
+			attachLastNumberListeners(currentGameId);
+		  }
+		}, (err) => {
+		  console.error("userCurrentGame read error:", err);
+		});
+	  }).catch(console.error);
+	});
 
-      const response = await fetch("https://us-central1-z-ggame.cloudfunctions.net/assignRandomNumber", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + idToken
-        }
-      });
+	// Step 4: Attach listeners for last generated numbers
+	function attachLastNumberListeners(gameId) {
+	  // My last number
+	  const myLastRef = db
+		.ref(`games/${gameId}/players/${currentUid}/numbers`)
+		.orderByChild("createdAt")
+		.limitToLast(1);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Failed:", errorText);
-        return;
-      }
+	  myLastRef.on("child_added", (snap) => {
+		const { number } = snap.val() || {};
+		if (number !== undefined) {
+		  document.getElementById("yourNumber").innerText = "Your Number: " + number;
+		}
+	  }, (err) => console.error("my numbers error:", err));
 
-      const data = await response.json();
-      console.log("Server response:", data);
-    }
+	  // Watch opponent
+	  const playersRef = db.ref(`games/${gameId}/players`);
+	  playersRef.on("value", (psnap) => {
+		const players = psnap.val() || {};
+		const opponentId = Object.keys(players).find((id) => id !== currentUid);
+		if (!opponentId) return;
 
+		// Detach previous opponent listener if any
+		if (typeof opponentNumbersOff === "function") {
+		  opponentNumbersOff();
+		  opponentNumbersOff = null;
+		}
+
+		const oppLastRef = db
+		  .ref(`games/${gameId}/players/${opponentId}/numbers`)
+		  .orderByChild("createdAt")
+		  .limitToLast(1);
+
+		const onOppChildAdded = (snap) => {
+		  const { number } = snap.val() || {};
+		  if (number !== undefined) {
+			document.getElementById("opponentNumber").innerText =
+			  "Opponent's Number: " + number;
+		  }
+		};
+		const onOppError = (err) => console.error("opponent numbers error:", err);
+
+		oppLastRef.on("child_added", onOppChildAdded, onOppError);
+
+		// Store detach function
+		opponentNumbersOff = () => oppLastRef.off("child_added", onOppChildAdded);
+	  }, (err) => console.error("players read error:", err));
+	}
+
+	// Step 5: Call backend to generate number
+	async function generateNumber() {
+	  const user = firebase.auth().currentUser;
+	  if (!user) {
+		console.error("User not signed in");
+		return;
+	  }
+	  const idToken = await user.getIdToken();
+
+	  const response = await fetch(
+		"https://us-central1-z-ggame.cloudfunctions.net/generateNumber",
+		{
+		  method: "POST",
+		  headers: {
+			"Content-Type": "application/json",
+			"Authorization": "Bearer " + idToken
+		  }
+		}
+	  );
+
+	  if (!response.ok) {
+		const errorText = await response.text();
+		console.error("Failed:", errorText);
+		return;
+	  }
+
+	  const data = await response.json();
+	  console.log("Server response:", data);
+	}
   </script>
 </body>
 </html>
