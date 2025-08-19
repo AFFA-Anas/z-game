@@ -6,6 +6,20 @@ const admin = require("firebase-admin");
 admin.initializeApp();
 
 /**
+ * Shuffles an array in place using Fisher–Yates algorithm.
+ *
+ * @param {any[]} arr - The array to shuffle.
+ * @return {any[]} The shuffled array (same reference as input).
+ */
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/**
  * ✅ Matchmaking (Realtime Database trigger)
  * When a user joins the lobby, tries to pair them with another waiting user.
  */
@@ -24,7 +38,9 @@ exports.matchmake = onValueCreated("/lobby/{uid}", async (event) => {
 
   // Create new game
   const gameId = db.ref("games").push().key;
+  const pool = shuffleArray(Array.from({length: 81}, (_, i) => i));
   const gameData = {
+    numbersPool: pool,
     players: {
       [newUid]: {status: "waiting"},
       [opponentId]: {status: "waiting"},
@@ -86,13 +102,25 @@ exports.generateNumber = onRequest(async (req, res) => {
       return res.status(400).send("User is not in a game");
     }
 
-    // Generate random number
-    const number = Math.floor(Math.random() * 100);
+    const gameRef = admin.database().ref(`games/${currentGameId}`);
+
+    // --- 🔹 Pick the next number from numbersPool ---
+    const poolSnap = await gameRef.child("numbersPool").once("value");
+    const pool = poolSnap.val();
+
+    if (!pool || pool.length === 0) {
+      return res.status(400).send("No numbers left in the pool");
+    }
+
+    // Take first number from pool
+    const number = pool[0];
+
+    // Remove it from pool
+    await gameRef.child("numbersPool").set(pool.slice(1));
 
     // Append number to user's numbers list
-    await admin
-        .database()
-        .ref(`games/${currentGameId}/players/${uid}/numbers`)
+    await gameRef
+        .child(`players/${uid}/numbers`)
         .push({
           number,
           createdAt: admin.database.ServerValue.TIMESTAMP,
@@ -106,3 +134,4 @@ exports.generateNumber = onRequest(async (req, res) => {
     return res.status(500).send("Internal Server Error");
   }
 });
+
